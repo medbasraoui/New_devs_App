@@ -78,31 +78,9 @@ async def authenticate_request(
 
     token = credentials.credentials
     # Create cache key from token hash (more secure than storing full token)
-    token_hash = hashlib.sha256(token.encode()).hexdigest()[:16]
-
-    # Check cache first
-    if token_hash in auth_cache:
-        cached_data = auth_cache[token_hash]
-        if datetime.now().timestamp() - cached_data["timestamp"] < CACHE_DURATION:
-            cached_user = cached_data["user"]
-            # If not, force a refresh to get proper tenant isolation
-            if not cached_user.tenant_id:
-                logger.warning(f"AUTH: Cached auth for {cached_user.email} missing tenant_id - forcing refresh")
-                del auth_cache[token_hash]
-            else:
-                logger.info(
-                    f"AUTH: Using cached authentication for token {token_hash} (tenant: {cached_user.tenant_id}) for user: {cached_user.email}"
-                )
-                return cached_user
-        else:
-            # Remove expired cache entry
-            del auth_cache[token_hash]
-
-    logger.info(f"AUTH: Starting authentication - Token hash: {token_hash}, Token preview: {token[:20]}...")
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
 
     try:
-        logger.debug(f"AUTH: Verifying token with Supabase - Token: {token[:20]}...")
-
         # Verify token - handle both Supabase tokens and custom JWT tokens
         try:
             # First try to decode as a custom JWT token.
@@ -111,8 +89,11 @@ async def authenticate_request(
                     token, 
                     settings.secret_key, 
                     algorithms=["HS256"],
-                    audience="authenticated"  # Accept tokens with aud: "authenticated"
+                    audience="authenticated",
+                    options={"require_exp": True},
                 )
+                if int(payload["exp"]) <= datetime.now().timestamp():
+                    raise JWTError("Token expired")
                 logger.info(f"AUTH: Successfully decoded custom JWT token for {payload.get('email')}")
                 
                 # Create a mock user object from JWT payload
@@ -123,6 +104,7 @@ async def authenticate_request(
                         self.app_metadata = payload.get('app_metadata', {})
                         self.user_metadata = payload.get('user_metadata', {})
                         self.raw_app_metadata = payload.get('app_metadata', {})
+                        self.tenant_id = payload.get('tenant_id')
                         
                 user = MockUser(payload)
                 
@@ -149,6 +131,13 @@ async def authenticate_request(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Not authenticated",
             )
+
+        # Always verify the signature and expiry before serving cached identity.
+        cached_data = auth_cache.get(token_hash)
+        if cached_data and datetime.now().timestamp() - cached_data["timestamp"] < CACHE_DURATION:
+            cached_user = cached_data["user"]
+            if cached_user.id == user.id and cached_user.tenant_id:
+                return cached_user
 
         # Get user permissions.
         logger.debug(f"AUTH: Fetching permissions for user {user.id}")
@@ -253,7 +242,12 @@ async def authenticate_request(
         logger.info(f"User: {user.email} (ID: {user.id})")
 
         # Use TenantResolver for comprehensive tenant resolution
-        tenant_id = await TenantResolver.resolve_tenant_id(token=token, user_id=user.id, user_email=user.email)
+        tenant_id = TenantResolver.resolve_tenant_from_user({
+            "tenant_id": getattr(user, "tenant_id", None),
+            "app_metadata": getattr(user, "app_metadata", {}) or {},
+        })
+        if not tenant_id:
+            tenant_id = await TenantResolver.resolve_tenant_id(user_id=user.id, user_email=user.email)
 
         # If we found a tenant_id and it's not in the user's metadata, update it for next time
         current_tenant_in_metadata = None

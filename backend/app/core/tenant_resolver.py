@@ -3,6 +3,7 @@ Minimal tenant resolver for authentication.
 """
 from typing import Optional
 import logging
+from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 
@@ -21,13 +22,7 @@ class TenantResolver:
         Returns:
             Tenant ID if found, None otherwise
         """
-        # Try user_metadata first (most common location)
-        if 'user_metadata' in token_payload:
-            tenant_id = token_payload['user_metadata'].get('tenant_id')
-            if tenant_id:
-                return tenant_id
-
-        # Try app_metadata as fallback
+        # Only use server-controlled claims from an already verified token.
         if 'app_metadata' in token_payload:
             tenant_id = token_payload['app_metadata'].get('tenant_id')
             if tenant_id:
@@ -53,13 +48,8 @@ class TenantResolver:
             Tenant ID if found, None otherwise
         """
         # Check various possible locations
-        if 'tenant_id' in user_data:
+        if user_data.get('tenant_id'):
             return user_data['tenant_id']
-
-        if 'user_metadata' in user_data:
-            tenant_id = user_data['user_metadata'].get('tenant_id')
-            if tenant_id:
-                return tenant_id
 
         if 'app_metadata' in user_data:
             tenant_id = user_data['app_metadata'].get('tenant_id')
@@ -80,16 +70,16 @@ class TenantResolver:
         Returns:
             Tenant ID
         """
-        # Fallback mapping by known user email.
-        if user_email == "sunset@propertyflow.com":
-            return "tenant-a"
-        if user_email == "ocean@propertyflow.com":
-            return "tenant-b"
-        if user_email == "candidate@propertyflow.com":
-            return "tenant-a"
-            
-        # Default fallback
-        return "tenant-a"
+        from app.database import supabase
+
+        response = supabase.service.table("user_tenants").select("tenant_id").eq(
+            "user_id", user_id
+        ).eq("is_active", True).execute()
+        tenant_ids = {row["tenant_id"] for row in response.data if row.get("tenant_id")}
+        if len(tenant_ids) == 1:
+            return tenant_ids.pop()
+        logger.warning("Missing or ambiguous tenant membership for user %s", user_id)
+        raise HTTPException(status_code=403, detail="Tenant context required")
 
     @staticmethod
     async def update_user_tenant_metadata(user_id: str, tenant_id: str) -> None:

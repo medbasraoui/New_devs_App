@@ -5,6 +5,7 @@ import { authOptimizer } from '../utils/authOptimizer';
 import { sessionRecovery } from '../utils/sessionRecovery';
 import { sessionPersistenceManager } from '../utils/SessionPersistenceManager';
 import { extractTenantFromSession } from '../utils/jwtUtils';
+import { SecureAPI } from '../lib/secureApi';
 
 // Global logout flag to prevent session recovery during logout
 if (typeof window !== 'undefined') {
@@ -126,10 +127,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
+        SecureAPI.setAccessToken(session.access_token);
         const enrichedUser = enrichUserWithTenant(session);
         setUser(enrichedUser);
         setIsAuthenticated(true);
       } else {
+        SecureAPI.setAccessToken(null);
         setUser(null);
         setIsAuthenticated(false);
       }
@@ -205,6 +208,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Set up auth state change listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      SecureAPI.setAccessToken(session?.access_token ?? null);
       console.log('🔍 [AuthContext] Auth state changed EVENT:', event);
       console.log('🔍 [AuthContext] Session present:', !!session);
 

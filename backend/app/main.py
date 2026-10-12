@@ -89,6 +89,8 @@ async def cache_invalidation_listener():
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting up...")
+    from .core.database_pool import db_pool
+    await db_pool.initialize()
 
     # Initialize Supabase connection pool
     try:
@@ -122,6 +124,7 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     logger.info("Shutting down...")
+    await db_pool.close()
 
     # Shutdown async processor
     await async_processor.shutdown()

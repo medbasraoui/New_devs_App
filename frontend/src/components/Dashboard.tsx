@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { RevenueSummary } from "./RevenueSummary";
+import { useAuth } from "../contexts/AuthContext.new";
 
 const PROPERTIES = [
   { id: 'prop-001', name: 'Beach House Alpha' },
@@ -10,7 +11,15 @@ const PROPERTIES = [
 ];
 
 const Dashboard: React.FC = () => {
+  const { user } = useAuth();
   const [selectedProperty, setSelectedProperty] = useState('prop-001');
+  const [period, setPeriod] = useState('2024-03');
+  const [year, month] = period.split('-').map(Number);
+  const tenantProperties = user?.tenant_id === 'tenant-b'
+    ? PROPERTIES.filter(property => ['prop-001', 'prop-004', 'prop-005'].includes(property.id))
+      .map(property => property.id === 'prop-001' ? { ...property, name: 'Mountain Lodge Beta' } : property)
+    : PROPERTIES.filter(property => ['prop-001', 'prop-002', 'prop-003'].includes(property.id));
+  const activeProperty = tenantProperties.some(property => property.id === selectedProperty) ? selectedProperty : 'prop-001';
 
   return (
     <div className="p-4 lg:p-6 min-h-full">
@@ -29,13 +38,24 @@ const Dashboard: React.FC = () => {
               
               {/* Property Selector */}
               <div className="flex flex-col sm:items-end">
+                <label htmlFor="revenue-period" className="text-xs font-medium text-gray-700 mb-1">Reporting Month</label>
+                <input
+                  id="revenue-period"
+                  type="month"
+                  value={period}
+                  min="0001-01"
+                  max="9998-12"
+                  required
+                  onChange={event => { if (event.target.value) setPeriod(event.target.value); }}
+                  className="mb-3 px-3 py-2 border border-gray-300 rounded-md text-sm"
+                />
                 <label className="text-xs font-medium text-gray-700 mb-1">Select Property</label>
                 <select
-                  value={selectedProperty}
+                  value={activeProperty}
                   onChange={(e) => setSelectedProperty(e.target.value)}
                   className="block w-full sm:w-auto min-w-[200px] px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
                 >
-                  {PROPERTIES.map((property) => (
+                  {tenantProperties.map((property) => (
                     <option key={property.id} value={property.id}>
                       {property.name}
                     </option>
@@ -46,7 +66,7 @@ const Dashboard: React.FC = () => {
           </div>
 
           <div className="space-y-6">
-            <RevenueSummary propertyId={selectedProperty} />
+            <RevenueSummary propertyId={activeProperty} month={month} year={year} />
           </div>
         </div>
       </div>

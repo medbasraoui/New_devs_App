@@ -1,49 +1,54 @@
 import React, { useEffect, useState } from 'react';
 import { SecureAPI } from '../lib/secureApi';
+import { useAuth } from '../contexts/AuthContext.new';
+import { formatRevenue } from '../utils/formatRevenue';
 
 interface RevenueData {
     property_id: string;
     total_revenue: number;
+    total_revenue_exact: string;
     currency: string;
     reservations_count: number;
 }
 
 interface RevenueSummaryProps {
     propertyId?: string;
-    debugTenant?: string; 
+    month?: number;
+    year?: number;
     showRaw?: boolean;
 }
 
-export const RevenueSummary: React.FC<RevenueSummaryProps> = ({ propertyId = 'prop-001', debugTenant, showRaw }) => {
-    const [data, setData] = useState<RevenueData | null>(null);
+export const RevenueSummary: React.FC<RevenueSummaryProps> = ({ propertyId = 'prop-001', month, year, showRaw }) => {
+    const { user } = useAuth();
+    const requestId = JSON.stringify([user?.id, user?.tenant_id, propertyId, year, month]);
+    const [result, setResult] = useState<{ requestId: string; data: RevenueData } | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
-    const activeTenant = debugTenant || 'candidate';
-
     useEffect(() => {
+        let cancelled = false;
         const fetchRevenue = async () => {
             setLoading(true);
+            setError('');
             try {
-                // Use SecureAPI to handle authentication automatically
-                // We pass the simulatedTenant option which SecureAPI will attach as a header
-                const response = await SecureAPI.getDashboardSummary(propertyId, {
-                    simulatedTenant: activeTenant,
-                    timestamp: Date.now()
-                });
-                setData(response);
+                if (!user) return;
+                const response = await SecureAPI.getDashboardSummary(propertyId, { month, year });
+                formatRevenue(response.total_revenue_exact);
+                if (!cancelled) setResult({ requestId, data: response });
             } catch (err) {
-                setError('Failed to load revenue data');
+                if (!cancelled) setError('Failed to load revenue data');
                 console.error(err);
             } finally {
-                setLoading(false);
+                if (!cancelled) setLoading(false);
             }
         };
 
         fetchRevenue();
-    }, [propertyId, activeTenant]);
+        return () => { cancelled = true; };
+    }, [propertyId, month, year, user, requestId]);
 
-    if (loading) {
+    const data = result?.requestId === requestId ? result.data : null;
+    if (loading || (!data && !error && user)) {
         return (
             <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
                 <div className="animate-pulse space-y-4">
@@ -61,7 +66,7 @@ export const RevenueSummary: React.FC<RevenueSummaryProps> = ({ propertyId = 'pr
     if (error) return <div className="p-4 text-red-500 bg-red-50 rounded-lg">{error}</div>;
     if (!data) return null;
 
-    const displayTotal = Math.round(data.total_revenue * 100) / 100;
+    const displayTotal = formatRevenue(data.total_revenue_exact);
 
     return (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow duration-300">
@@ -78,7 +83,7 @@ export const RevenueSummary: React.FC<RevenueSummaryProps> = ({ propertyId = 'pr
                         <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wide">Total Revenue</h2>
                         <div className="flex items-baseline gap-2 mt-1">
                             <span className="text-3xl font-bold text-gray-900 tracking-tight">
-                                {data.currency} {displayTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                {data.currency} {displayTotal}
                             </span>
                             {/* Fake trend indicator for premium feel */}
                             <span className="inline-flex items-baseline px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 md:mt-2 lg:mt-0">
@@ -102,17 +107,6 @@ export const RevenueSummary: React.FC<RevenueSummaryProps> = ({ propertyId = 'pr
                     </div>
                 </div>
 
-                {/* Precision Warning Area */}
-                <div className="mt-4 h-6">
-                    {Math.abs(data.total_revenue - displayTotal) > 0.000001 && showRaw && (
-                        <div className="flex items-center text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">
-                            <svg className="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                            </svg>
-                            Precision Mismatch Detected
-                        </div>
-                    )}
-                </div>
             </div>
         </div>
     );

@@ -41,13 +41,16 @@ class Settings(BaseSettings):
         
         for var_name, value in critical_env_vars.items():
             if value:
-                preview = value[:15] + "..." if len(value) > 15 else value
-                logger.info(f"✅ ENV {var_name}: {preview} (len: {len(value)})")
+                logger.info(f"✅ ENV {var_name}: SET")
             else:
                 logger.info(f"❌ ENV {var_name}: NOT SET")
         
         # Call parent constructor
         super().__init__(**kwargs)
+        if self.environment != "development" and (
+            self.secret_key == "debug_challenge_secret" or len(self.secret_key.encode()) < 32
+        ):
+            raise ValueError("A private SECRET_KEY of at least 32 bytes is required outside development")
         
         # Log what Pydantic actually loaded
         logger.info("📊 PYDANTIC LOADED VALUES:")
@@ -61,8 +64,7 @@ class Settings(BaseSettings):
         
         for field_name, value in loaded_values.items():
             if value:
-                preview = str(value)[:15] + "..." if len(str(value)) > 15 else str(value)
-                logger.info(f"✅ LOADED {field_name}: {preview} (len: {len(str(value))})")
+                logger.info(f"✅ LOADED {field_name}: SET")
             else:
                 logger.info(f"❌ LOADED {field_name}: NOT SET")
         
